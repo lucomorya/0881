@@ -1,4 +1,4 @@
-# 0081
+# 0881
 
 A plain-text blog. Posting means adding a text file through GitHub's
 own website - no terminal, no installs, works from a phone.
@@ -18,7 +18,7 @@ own website - no terminal, no installs, works from a phone.
    Once it finishes (a green checkmark, usually under a minute), your
    site is live at:
 
-   **https://lucomorya.github.io/0081/**
+   **https://lucomorya.github.io/0881/**
 
 ## How to post, from now on
 
