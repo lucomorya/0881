@@ -1,0 +1,2 @@
+First post. From here on, new entries get added as text files in this
+folder - no computer required, just GitHub's own editor.
