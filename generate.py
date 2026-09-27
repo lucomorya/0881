@@ -1,25 +1,10 @@
 #!/usr/bin/env python3
-"""
-generate.py - turns a folder of plain text files into one plain HTML page.
-
-No installs, no server, no database. Uses only Python's standard library.
-
-HOW TO POST:
-  1. Create a new file in posts/, named like 2026-09-27-whatever.txt
-     (the date at the front controls sort order; the rest is just for you).
-  2. Write up to about 1000 characters of plain text in it.
-  3. Run:  python3 generate.py
-  4. Open site/index.html in a browser, or upload it anywhere.
-
-That's the whole workflow.
-"""
-
 import html
 from pathlib import Path
 
 POSTS_DIR = Path(__file__).parent / "posts"
 OUTPUT_DIR = Path(__file__).parent / "site"
-SITE_TITLE = "0081"
+SITE_TITLE = "( .  人  . )"
 MAX_CHARS = 1000  # just a warning, not enforced - these are your own files
 
 
