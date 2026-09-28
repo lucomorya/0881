@@ -33,7 +33,7 @@ ASSETS_DIR = ROOT / "assets"
 OUTPUT_DIR = ROOT / "site"
 TAGS_DIR_NAME = "tags"
 
-SITE_TITLE = "( .  人  . )"
+SITE_TITLE = "おっぱい"
 MAX_CHARS = 1000  # only a warning, never enforced
 
 CSS = """
