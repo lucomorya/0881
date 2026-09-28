@@ -6,7 +6,11 @@ optional header lines, in any order, followed by the text:
 
     tags: games, opinion
     cover: cover-volume12.jpg
+    spoiler: yes
     Why I think TLOU2 is bad game: ...
+
+The cover is shown as a small thumbnail that opens full size when clicked.
+With 'spoiler: yes' it is hidden behind a "Show image" toggle first.
 
 Output goes to site/:
     index.html            all posts
@@ -50,7 +54,15 @@ h2 { font-size: 1.1em; font-weight: normal; color: #666; }
 }
 .entry p { margin: 0 0 0.6em 0; white-space: pre-wrap; }
 .entry p.date, .entry p.tags { white-space: normal; }
-.cover { max-width: 100%; height: auto; margin-bottom: 0.6em; }
+.cover { max-width: min(100%, 240px); height: auto; margin-bottom: 0.6em; }
+details { margin-bottom: 0.6em; }
+summary {
+  cursor: pointer;
+  color: #666;
+  font-family: Verdana, Arial, sans-serif;
+  font-size: 0.85em;
+  margin-bottom: 0.4em;
+}
 hr { border: none; border-top: 1px solid #ccc; margin: 1.5em 0; }
 """.strip()
 
@@ -61,6 +73,7 @@ class Post:
     text: str
     cover: str = ""
     tags: list[str] = field(default_factory=list)
+    spoiler: bool = False
 
 
 def parse_date(stem: str) -> str:
@@ -76,12 +89,12 @@ def slugify(tag: str) -> str:
 
 
 def parse_header(raw: str) -> tuple[dict[str, str], str]:
-    """Split leading 'key: value' lines (tags, cover) from the post body."""
+    """Split leading 'key: value' lines (tags, cover, spoiler) from the post body."""
     header: dict[str, str] = {}
     lines = raw.split("\n")
     while lines:
         key, sep, value = lines[0].partition(":")
-        if sep and key.strip().lower() in ("tags", "cover"):
+        if sep and key.strip().lower() in ("tags", "cover", "spoiler"):
             header[key.strip().lower()] = value.strip()
             lines.pop(0)
         else:
@@ -99,6 +112,7 @@ def load_posts() -> list[Post]:
         header, text = parse_header(raw)
         cover = header.get("cover", "")
         tags = [t.strip() for t in header.get("tags", "").split(",") if t.strip()]
+        spoiler = header.get("spoiler", "").lower() in ("yes", "true", "1")
 
         if cover and not (ASSETS_DIR / cover).is_file():
             print(f"WARNING: {path.name} uses missing cover 'assets/{cover}'.")
@@ -106,7 +120,7 @@ def load_posts() -> list[Post]:
             print(f"NOTE: {path.name} is {len(text)} characters "
                   f"(guideline is {MAX_CHARS}).")
 
-        posts.append(Post(parse_date(path.stem), text, cover, tags))
+        posts.append(Post(parse_date(path.stem), text, cover, tags, spoiler))
     return posts
 
 
@@ -135,7 +149,11 @@ def render_post(post: Post, root: str) -> str:
         parts.append(f'<p class="date">{html.escape(post.date)}</p>')
     if post.cover:
         src = html.escape(f"{root}assets/{post.cover}", quote=True)
-        parts.append(f'<img class="cover" src="{src}" alt="Cover image">')
+        image = (f'<a href="{src}"><img class="cover" src="{src}" '
+                 f'alt="Cover image" loading="lazy"></a>')
+        if post.spoiler:
+            image = f"<details><summary>Show image</summary>{image}</details>"
+        parts.append(image)
     parts.append(f"<p>{html.escape(post.text)}</p>")
     if post.tags:
         links = ", ".join(
