@@ -12,7 +12,7 @@ Why I think TLOU2 is bad game: ...
 ```
 
 Pictures are stored in assets/. With 'spoiler: yes', the picture is hidden
-behind a "Show image" toggle first.
+behind a "show me" toggle first.
 
 Output goes to site/:
 index.html            all posts
@@ -262,7 +262,7 @@ if post.pics:
     if post.spoiler:
         image = (
             "<details>"
-            "<summary>Show image</summary>"
+            "<summary>how me</summary>"
             f"{image}"
             "</details>"
         )
