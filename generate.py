@@ -5,10 +5,10 @@ Each post lives in posts/YYYY-MM-DD-slug.txt. The top of a post may have
 optional header lines, in any order, followed by the text:
 
 ```
-tags: games, opinion
+tags: anime, games, manga
 pics: cover-volume12.jpg
 spoiler: yes
-Why I think TLOU2 is bad game: ...
+Post here
 ```
 
 Pictures are stored in assets/. With 'spoiler: yes', the picture is hidden
