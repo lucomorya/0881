@@ -40,7 +40,8 @@ body {
   margin: 2em auto;
   padding: 0 1em;
   font-family: Georgia, "Times New Roman", serif;
-  line-height: 1.5;
+  font-size: 1.125rem; /* 18px by default, still follows the reader's browser setting */
+  line-height: 1.6;
   color: #222;
 }
 h1 { font-size: 1.6em; margin-bottom: 0.2em; }
