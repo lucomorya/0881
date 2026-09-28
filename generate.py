@@ -91,3 +91,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+import shutil
+shutil.copytree("assets", "site/assets", dirs_exist_ok=True)
