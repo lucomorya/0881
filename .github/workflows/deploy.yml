@@ -21,13 +21,14 @@ jobs:
       - name: Check out repo
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.x"
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo build
+        uses: Swatinem/rust-cache@v2
 
       - name: Build the site
-        run: python3 generate.py
+        run: cargo run --release
 
       - name: Upload built site
         uses: actions/upload-pages-artifact@v3
