@@ -50,8 +50,17 @@ h2 { font-size: 1.1em; font-weight: normal; color: #666; }
   font-size: 0.85em;
   margin: 0 0 0.3em 0;
 }
-.entry p { margin: 0 0 0.6em 0; white-space: pre-wrap; }
-.entry p.date, .entry p.tags { white-space: normal; }
+.entry p {
+  margin: 0 0 0.6em 0;
+  white-space: pre-wrap;
+  text-align: justify;
+  hyphens: auto;
+}
+.entry p.date, .entry p.tags {
+  white-space: normal;
+  text-align: left;
+  hyphens: manual;
+}
 .pic {
   max-width: min(100%, 240px);
   height: auto;
