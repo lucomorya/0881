@@ -1,3 +1,6 @@
- reading: cover-volume12.jpg　よつばと！１６.jpg　描くなるうえは５.jpg　生徒会にも穴はいる！１.jpg
- watching: 
- bitching: 
+reading: cover-volume12.jpg　
+reading: よつばと！１６.jpg　
+reading: 描くなるうえは５.jpg　
+reading: 生徒会にも穴はいる！１.jpg
+watching: 
+bitching: 
