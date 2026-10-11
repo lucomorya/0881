@@ -11,24 +11,36 @@
 //! Pictures are stored in assets/. With `spoiler: yes`, the picture is hidden
 //! behind a "show me" toggle first.
 //!
-//! An optional sidebar.txt (next to Cargo.toml) lists what you are currently
+//! sidebar.txt (optional, next to Cargo.toml) lists what you are currently
 //! reading/watching/etc. One item per line:
 //!
 //!     reading: cover-volume12.jpg | Harem in the Labyrinth of Another World
-//!     watching: mayoiga.jpg | Mayoiga
+//!     watching:
 //!
-//! Lines starting with # and blank lines are ignored. Sections appear in the
-//! order they first show up. Pictures live in assets/.
+//! collection.txt (optional, next to Cargo.toml) becomes collection.html.
+//! Lines starting with == start a section; every other line is one item:
+//!
+//!     == MANGA
+//!     DANDADAN | 22 di ?? | J-POP | cover: dandadan.jpg | review: 2026-10-20-dandadan
+//!
+//! After the title, fields are separated by |. A field starting with
+//! `cover:` is the picture (in assets/), `review:` is the filename (without
+//! .txt) of the post that reviews it, or a full http(s) link. Any other
+//! field is shown as plain details. A cover is only clickable when there is
+//! a review.
+//!
+//! Lines starting with # and blank lines are ignored in both files.
 //!
 //! Output goes to site/:
 //!     index.html            all posts
 //!     tags/<tag>.html       one page per tag (grouped by year)
+//!     collection.html       your collection (only if collection.txt exists)
 //!     assets/               copied from assets/
 //!
 //! Run from the blog's folder, or pass the folder as the first argument:
 //!     cargo run --release -- path/to/blog
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error;
 use std::ffi::OsStr;
 use std::fs;
@@ -53,14 +65,14 @@ body {
 h1 { font-size: 1.6em; margin-bottom: 0.2em; }
 h1 a { color: inherit; text-decoration: none; }
 h2 { font-size: 1.1em; font-weight: normal; color: #666; }
-h3.year {
+h3.year, h3.section {
   font-size: 0.95em;
   font-weight: normal;
   color: #666;
   font-family: Verdana, Arial, sans-serif;
   margin: 1.5em 0 0.5em 0;
 }
-.date, .tags, .tag-list {
+.date, .tags, .tag-list, .nav {
   color: #666;
   font-family: Verdana, Arial, sans-serif;
   font-size: 0.85em;
@@ -116,10 +128,6 @@ hr {
 }
 .sidebar h3:not(:first-child) { margin-top: 1.2em; }
 .shelf { display: flex; flex-wrap: wrap; gap: 0.5em; }
-.shelf:empty {
-  min-height: 5em;
-  border: 1px dashed #ccc;
-}
 .shelf figure { margin: 0; width: calc(50% - 0.25em); }
 .shelf img { display: block; width: 100%; height: auto; }
 .shelf figcaption {
@@ -128,6 +136,21 @@ hr {
   color: #666;
   line-height: 1.3;
   margin-top: 0.2em;
+}
+.collection { list-style: none; margin: 0; padding: 0; }
+.collection li {
+  display: flex;
+  align-items: center;
+  gap: 0.8em;
+  margin-bottom: 0.6em;
+}
+.collection .thumb { display: block; width: 56px; height: auto; }
+.collection .thumb-gap { display: block; width: 56px; flex: none; }
+.collection .info { display: flex; flex-direction: column; line-height: 1.35; }
+.collection .details {
+  font-family: Verdana, Arial, sans-serif;
+  font-size: 0.8em;
+  color: #666;
 }
 @media (max-width: 50em) {
   .layout { grid-template-columns: minmax(0, 1fr); }
@@ -140,9 +163,11 @@ struct Config {
     assets_dir: PathBuf,
     output_dir: PathBuf,
     sidebar_file: PathBuf,
+    collection_file: PathBuf,
 }
 
 struct Post {
+    id: String,
     date: String,
     text: String,
     pics: String,
@@ -157,6 +182,26 @@ struct ShelfItem {
 
 /// (section name, items), in the order they appear in sidebar.txt.
 type Shelf = Vec<(String, Vec<ShelfItem>)>;
+
+struct CollectionItem {
+    title: String,
+    details: String,
+    cover: String,
+    review: String,
+}
+
+/// (section name, items), in the order they appear in collection.txt.
+type Collection = Vec<(String, Vec<CollectionItem>)>;
+
+/// Everything needed to draw one HTML page.
+struct Page<'a> {
+    root: &'a str,
+    subtitle: &'a str,
+    nav: &'a str,
+    tag_bar: &'a str,
+    sidebar: &'a str,
+    body: &'a str,
+}
 
 /// Equivalent of Python's `html.escape(s, quote=True)`.
 fn escape(s: &str) -> String {
@@ -233,6 +278,21 @@ fn safe_pic_name(value: &str) -> Result<String> {
     }
 
     Ok(value.to_string())
+}
+
+/// If `field` starts with `key` (case-insensitive, e.g. "cover:"),
+/// return the rest of it, trimmed.
+fn strip_key<'a>(field: &'a str, key: &str) -> Option<&'a str> {
+    let n = key.len();
+    if field.len() >= n && field.is_char_boundary(n) && field[..n].eq_ignore_ascii_case(key) {
+        Some(field[n..].trim())
+    } else {
+        None
+    }
+}
+
+fn is_url(s: &str) -> bool {
+    s.starts_with("http://") || s.starts_with("https://")
 }
 
 /// Split leading header lines from the post body.
@@ -330,6 +390,7 @@ fn load_posts(cfg: &Config) -> Result<Vec<Post>> {
 
         posts.push(Post {
             date: parse_date(&stem),
+            id: stem,
             text,
             pics,
             tags,
@@ -380,7 +441,10 @@ fn load_shelf(cfg: &Config) -> Result<Shelf> {
         // No picture: just keep the (possibly empty) section, skip the item.
         if pic.is_empty() {
             if !title.trim().is_empty() {
-                println!("WARNING: sidebar.txt line {} has a title but no picture; skipped.", n + 1);
+                println!(
+                    "WARNING: sidebar.txt line {} has a title but no picture; skipped.",
+                    n + 1
+                );
             }
             continue;
         }
@@ -396,6 +460,70 @@ fn load_shelf(cfg: &Config) -> Result<Shelf> {
     }
 
     Ok(shelf)
+}
+
+/// Read collection.txt. A missing file simply means no collection page.
+fn load_collection(cfg: &Config) -> Result<Collection> {
+    if !cfg.collection_file.is_file() {
+        return Ok(Vec::new());
+    }
+
+    let raw = fs::read_to_string(&cfg.collection_file)?.replace("\r\n", "\n");
+    let mut sections: Collection = Vec::new();
+
+    for (n, line) in raw.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        // "== MANGA" starts a new section.
+        if let Some(name) = line.strip_prefix("==") {
+            sections.push((name.trim_start_matches('=').trim().to_string(), Vec::new()));
+            continue;
+        }
+
+        let mut fields = line.split('|').map(str::trim);
+        let title = fields.next().unwrap_or("").to_string();
+        let mut details: Vec<String> = Vec::new();
+        let mut cover = String::new();
+        let mut review = String::new();
+
+        for field in fields {
+            if let Some(v) = strip_key(field, "cover:") {
+                cover = safe_pic_name(v)
+                    .map_err(|e| format!("collection.txt line {}: {e}", n + 1))?;
+            } else if let Some(v) = strip_key(field, "review:") {
+                review = v.trim_end_matches(".txt").to_string();
+            } else if !field.is_empty() {
+                details.push(field.to_string());
+            }
+        }
+
+        if title.is_empty() {
+            return Err(format!("collection.txt line {}: missing title", n + 1).into());
+        }
+
+        if !cover.is_empty() && !cfg.assets_dir.join(&cover).is_file() {
+            println!("WARNING: collection.txt uses missing picture 'assets/{cover}'.");
+        }
+
+        // Items before any "==" line go in an unnamed section.
+        if sections.is_empty() {
+            sections.push((String::new(), Vec::new()));
+        }
+
+        if let Some(last) = sections.last_mut() {
+            last.1.push(CollectionItem {
+                title,
+                details: details.join(" · "),
+                cover,
+                review,
+            });
+        }
+    }
+
+    Ok(sections)
 }
 
 /// Map tag slug -> posts (sorted by slug).
@@ -441,9 +569,12 @@ fn tag_names(posts: &[Post]) -> Result<BTreeMap<String, String>> {
 }
 
 /// Render one post. `root` is the relative path back to the site root
-/// ("" or "../").
+/// ("" or "../"). Each post gets an id so other pages can link to it.
 fn render_post(post: &Post, root: &str) -> String {
-    let mut parts: Vec<String> = vec![r#"<div class="entry">"#.to_string()];
+    let mut parts: Vec<String> = vec![format!(
+        r#"<div class="entry" id="{}">"#,
+        escape(&post.id)
+    )];
 
     if !post.date.is_empty() {
         parts.push(format!(r#"<p class="date">{}</p>"#, escape(&post.date)));
@@ -511,6 +642,14 @@ fn render_posts(posts: &[&Post], root: &str, by_year: bool) -> String {
     out
 }
 
+fn render_posts_body(posts: &[&Post], root: &str, by_year: bool) -> String {
+    if posts.is_empty() {
+        "<p><em>Nothing posted yet.</em></p>".to_string()
+    } else {
+        render_posts(posts, root, by_year)
+    }
+}
+
 /// Render the sidebar. `root` is "" or "../" like in `render_post`.
 fn render_shelf(shelf: &Shelf, root: &str) -> String {
     if shelf.is_empty() {
@@ -521,7 +660,7 @@ fn render_shelf(shelf: &Shelf, root: &str) -> String {
 
     for (name, items) in shelf {
         out.push_str(&format!(
-            "\n<h3>{}:</h3>\n<div class=\"shelf\">",
+            "\n<h3>{}</h3>\n<div class=\"shelf\">",
             escape(name)
         ));
 
@@ -545,30 +684,88 @@ fn render_shelf(shelf: &Shelf, root: &str) -> String {
     out
 }
 
-fn render_page(
-    posts: &[&Post],
-    root: &str,
-    subtitle: &str,
-    tag_bar: &str,
-    sidebar: &str,
-    by_year: bool,
-) -> String {
+/// Render the collection page body. A cover (and the title) becomes a link
+/// only when the item has a review.
+fn render_collection(collection: &Collection, root: &str) -> String {
+    let mut out = String::new();
+
+    for (name, items) in collection {
+        if !name.is_empty() {
+            out.push_str(&format!(r#"<h3 class="section">{}</h3>"#, escape(name)));
+            out.push('\n');
+        }
+
+        // If some items in this section have covers, give the others a
+        // blank space so the titles line up.
+        let any_cover = items.iter().any(|i| !i.cover.is_empty());
+
+        out.push_str("<ul class=\"collection\">\n");
+
+        for item in items {
+            let title = escape(&item.title);
+
+            let href: Option<String> = if item.review.is_empty() {
+                None
+            } else if is_url(&item.review) {
+                Some(escape(&item.review))
+            } else {
+                Some(escape(&format!("{root}index.html#{}", item.review)))
+            };
+
+            let thumb = if item.cover.is_empty() {
+                if any_cover {
+                    r#"<span class="thumb-gap"></span>"#.to_string()
+                } else {
+                    String::new()
+                }
+            } else {
+                let src = escape(&format!("{root}assets/{}", item.cover));
+                let img = format!(
+                    r#"<img class="thumb" src="{src}" alt="{title}" loading="lazy">"#
+                );
+                match &href {
+                    Some(h) => format!(r#"<a href="{h}">{img}</a>"#),
+                    None => img,
+                }
+            };
+
+            let name_html = match &href {
+                Some(h) => format!(r#"<a href="{h}">{title}</a>"#),
+                None => title.clone(),
+            };
+
+            let details = if item.details.is_empty() {
+                String::new()
+            } else {
+                format!(r#"<span class="details">{}</span>"#, escape(&item.details))
+            };
+
+            out.push_str(&format!(
+                "<li>{thumb}<div class=\"info\"><span class=\"name\">{name_html}</span>{details}</div></li>\n"
+            ));
+        }
+
+        out.push_str("</ul>\n");
+    }
+
+    out
+}
+
+fn page_shell(p: &Page) -> String {
     let title = escape(SITE_TITLE);
 
-    let sub = if subtitle.is_empty() {
+    let sub = if p.subtitle.is_empty() {
         String::new()
     } else {
-        format!("<h2>{}</h2>", escape(subtitle))
+        format!("<h2>{}</h2>", escape(p.subtitle))
     };
 
-    let body = if posts.is_empty() {
-        "<p><em>Nothing posted yet.</em></p>".to_string()
-    } else {
-        render_posts(posts, root, by_year)
-    };
-
-    let home = if root.is_empty() { "./" } else { root };
+    let home = if p.root.is_empty() { "./" } else { p.root };
     let css = CSS.trim();
+    let nav = p.nav;
+    let tag_bar = p.tag_bar;
+    let body = p.body;
+    let sidebar = p.sidebar;
 
     format!(
         r#"<!doctype html>
@@ -586,6 +783,7 @@ fn render_page(
 <main>
 <h1><a href="{home}">{title}</a></h1>
 {sub}
+{nav}
 {tag_bar}
 {body}
 </main>
@@ -655,32 +853,82 @@ fn build(cfg: &Config) -> Result<()> {
     let side_index = render_shelf(&shelf, "");
     let side_tags = render_shelf(&shelf, "../");
 
+    let collection = load_collection(cfg)?;
+    let has_collection = !collection.is_empty();
+
+    // Warn about reviews that point at a post that doesn't exist.
+    let post_ids: HashSet<&str> = posts.iter().map(|p| p.id.as_str()).collect();
+    for (_, items) in &collection {
+        for item in items {
+            if !item.review.is_empty()
+                && !is_url(&item.review)
+                && !post_ids.contains(item.review.as_str())
+            {
+                println!(
+                    "WARNING: collection.txt: review '{}' (for '{}') matches no post.",
+                    item.review, item.title
+                );
+            }
+        }
+    }
+
+    let nav_index = if has_collection {
+        r#"<p class="nav"><a href="collection.html">collection</a></p>"#.to_string()
+    } else {
+        String::new()
+    };
+    let nav_tags = if has_collection {
+        r#"<p class="nav"><a href="../collection.html">collection</a></p>"#.to_string()
+    } else {
+        String::new()
+    };
+
+    // Home page.
     let all: Vec<&Post> = posts.iter().collect();
-    let index = render_page(
-        &all,
-        "",
-        "",
-        &render_tag_bar(&groups, &names),
-        &side_index,
-        false,
-    );
+    let tag_bar = render_tag_bar(&groups, &names);
+    let index_body = render_posts_body(&all, "", false);
+    let index = page_shell(&Page {
+        root: "",
+        subtitle: "",
+        nav: &nav_index,
+        tag_bar: &tag_bar,
+        sidebar: &side_index,
+        body: &index_body,
+    });
     fs::write(cfg.output_dir.join("index.html"), index)?;
 
+    // Tag pages.
     if !groups.is_empty() {
         let tags_dir = cfg.output_dir.join(TAGS_DIR_NAME);
         fs::create_dir(&tags_dir)?;
 
         for (slug, tagged) in &groups {
-            let page = render_page(
-                tagged,
-                "../",
-                &format!("Tag: {}", names[slug]),
-                "",
-                &side_tags,
-                true,
-            );
+            let subtitle = format!("Tag: {}", names[slug]);
+            let body = render_posts_body(tagged, "../", true);
+            let page = page_shell(&Page {
+                root: "../",
+                subtitle: &subtitle,
+                nav: &nav_tags,
+                tag_bar: "",
+                sidebar: &side_tags,
+                body: &body,
+            });
             fs::write(tags_dir.join(format!("{slug}.html")), page)?;
         }
+    }
+
+    // Collection page.
+    if has_collection {
+        let body = render_collection(&collection, "");
+        let page = page_shell(&Page {
+            root: "",
+            subtitle: "Collection",
+            nav: "",
+            tag_bar: "",
+            sidebar: "",
+            body: &body,
+        });
+        fs::write(cfg.output_dir.join("collection.html"), page)?;
     }
 
     if cfg.assets_dir.is_dir() {
@@ -708,6 +956,7 @@ fn run() -> Result<()> {
         assets_dir: root.join("assets"),
         output_dir: root.join("site"),
         sidebar_file: root.join("sidebar.txt"),
+        collection_file: root.join("collection.txt"),
     };
 
     fs::create_dir_all(&cfg.posts_dir)?;
