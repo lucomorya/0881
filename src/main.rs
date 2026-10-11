@@ -116,6 +116,10 @@ hr {
 }
 .sidebar h3:not(:first-child) { margin-top: 1.2em; }
 .shelf { display: flex; flex-wrap: wrap; gap: 0.5em; }
+.shelf:empty {
+  min-height: 5em;
+  border: 1px dashed #ccc;
+}
 .shelf figure { margin: 0; width: calc(50% - 0.25em); }
 .shelf img { display: block; width: 100%; height: auto; }
 .shelf figcaption {
@@ -362,24 +366,33 @@ fn load_shelf(cfg: &Config) -> Result<Shelf> {
 
         let pic =
             safe_pic_name(pic).map_err(|e| format!("sidebar.txt line {}: {e}", n + 1))?;
+
+        // Make sure the section exists, even if it has no items yet.
+        let section = section.trim().to_string();
+        let idx = match shelf.iter().position(|(name, _)| *name == section) {
+            Some(i) => i,
+            None => {
+                shelf.push((section, Vec::new()));
+                shelf.len() - 1
+            }
+        };
+
+        // No picture: just keep the (possibly empty) section, skip the item.
         if pic.is_empty() {
-            return Err(format!("sidebar.txt line {}: missing picture", n + 1).into());
+            if !title.trim().is_empty() {
+                println!("WARNING: sidebar.txt line {} has a title but no picture; skipped.", n + 1);
+            }
+            continue;
         }
+
         if !cfg.assets_dir.join(&pic).is_file() {
             println!("WARNING: sidebar.txt uses missing picture 'assets/{pic}'.");
         }
 
-        let section = section.trim().to_string();
-        let item = ShelfItem {
+        shelf[idx].1.push(ShelfItem {
             pic,
             title: title.trim().to_string(),
-        };
-
-        if let Some(i) = shelf.iter().position(|(name, _)| *name == section) {
-            shelf[i].1.push(item);
-        } else {
-            shelf.push((section, vec![item]));
-        }
+        });
     }
 
     Ok(shelf)
