@@ -32,7 +32,8 @@
 //! Lines starting with # and blank lines are ignored in both files.
 //!
 //! Output goes to site/:
-//!     index.html            all posts
+//!     index.html            the latest HOME_POSTS posts
+//!     archive/<year>.html   every post of that year
 //!     tags/<tag>.html       one page per tag (grouped by year)
 //!     collection.html       your collection (only if collection.txt exists)
 //!     assets/               copied from assets/
@@ -40,7 +41,7 @@
 //! Run from the blog's folder, or pass the folder as the first argument:
 //!     cargo run --release -- path/to/blog
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::ffi::OsStr;
 use std::fs;
@@ -49,6 +50,8 @@ use std::path::{Path, PathBuf};
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
 const TAGS_DIR_NAME: &str = "tags";
+const ARCHIVE_DIR_NAME: &str = "archive";
+const HOME_POSTS: usize = 20; // how many of the newest posts the home page shows
 const SITE_TITLE: &str = "おっぱい";
 const MAX_CHARS: usize = 1000; // only a warning, never enforced
 
@@ -542,6 +545,26 @@ fn group_by_tag(posts: &[Post]) -> BTreeMap<String, Vec<&Post>> {
     groups
 }
 
+/// The year a post belongs to, safe for use in a filename ("undated" if the
+/// filename has no date).
+fn year_key(post: &Post) -> String {
+    match post.date.get(..4) {
+        Some(year) => slugify(year),
+        None => "undated".to_string(),
+    }
+}
+
+/// Map year -> posts of that year (newest first inside each year).
+fn group_by_year(posts: &[Post]) -> BTreeMap<String, Vec<&Post>> {
+    let mut years: BTreeMap<String, Vec<&Post>> = BTreeMap::new();
+
+    for post in posts {
+        years.entry(year_key(post)).or_default().push(post);
+    }
+
+    years
+}
+
 /// Map tag slug -> display name.
 ///
 /// Fails if different tag names would produce the same URL slug.
@@ -689,7 +712,11 @@ fn render_shelf(shelf: &Shelf, root: &str) -> String {
 
 /// Render the collection page body. A cover (and the title) becomes a link
 /// only when the item has a review.
-fn render_collection(collection: &Collection, root: &str) -> String {
+fn render_collection(
+    collection: &Collection,
+    root: &str,
+    post_year: &HashMap<&str, &str>,
+) -> String {
     let mut out = String::new();
 
     for (name, items) in collection {
@@ -712,7 +739,12 @@ fn render_collection(collection: &Collection, root: &str) -> String {
             } else if is_url(&item.review) {
                 Some(escape(&item.review))
             } else {
-                Some(escape(&format!("{root}index.html#{}", item.review)))
+                post_year.get(item.review.as_str()).map(|year| {
+                    escape(&format!(
+                        "{root}{ARCHIVE_DIR_NAME}/{year}.html#{}",
+                        item.review
+                    ))
+                })
             };
 
             let thumb = if item.cover.is_empty() {
@@ -752,6 +784,39 @@ fn render_collection(collection: &Collection, root: &str) -> String {
     }
 
     out
+}
+
+/// A line of links to the year pages. `prefix` is the path from the current
+/// page to the archive folder ("archive/" from the home page, "" from inside
+/// it). The `current` year is shown without a link.
+fn render_archive_bar(
+    years: &BTreeMap<String, Vec<&Post>>,
+    prefix: &str,
+    current: Option<&str>,
+    label: &str,
+) -> String {
+    if years.is_empty() {
+        return String::new();
+    }
+
+    let links = years
+        .iter()
+        .rev()
+        .map(|(key, posts)| {
+            if Some(key.as_str()) == current {
+                format!("{} ({})", escape(key), posts.len())
+            } else {
+                format!(
+                    r#"<a href="{prefix}{key}.html">{}</a> ({})"#,
+                    escape(key),
+                    posts.len()
+                )
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" · ");
+
+    format!(r#"<p class="tag-list">{label}: {links}</p>"#)
 }
 
 fn page_shell(p: &Page) -> String {
@@ -856,6 +921,7 @@ fn build(cfg: &Config) -> Result<()> {
     let posts = load_posts(cfg)?;
     let groups = group_by_tag(&posts);
     let names = tag_names(&posts)?;
+    let years = group_by_year(&posts);
 
     // Tag pages live one folder deeper, so their image paths need "../".
     let shelf = load_shelf(cfg)?;
@@ -866,12 +932,17 @@ fn build(cfg: &Config) -> Result<()> {
     let has_collection = !collection.is_empty();
 
     // Warn about reviews that point at a post that doesn't exist.
-    let post_ids: HashSet<&str> = posts.iter().map(|p| p.id.as_str()).collect();
+    let mut post_year: HashMap<&str, &str> = HashMap::new();
+    for (key, year_posts) in &years {
+        for post in year_posts {
+            post_year.insert(post.id.as_str(), key.as_str());
+        }
+    }
     for (_, items) in &collection {
         for item in items {
             if !item.review.is_empty()
                 && !is_url(&item.review)
-                && !post_ids.contains(item.review.as_str())
+                && !post_year.contains_key(item.review.as_str())
             {
                 println!(
                     "WARNING: collection.txt: review '{}' (for '{}') matches no post.",
@@ -894,8 +965,17 @@ fn build(cfg: &Config) -> Result<()> {
 
     // Home page.
     let all: Vec<&Post> = posts.iter().collect();
+    let shown = &all[..all.len().min(HOME_POSTS)];
     let tag_bar = render_tag_bar(&groups, &names);
-    let index_body = render_posts_body(&all, "", false);
+    let mut index_body = render_posts_body(shown, "", false);
+    if all.len() > shown.len() {
+        index_body.push_str(&render_archive_bar(
+            &years,
+            &format!("{ARCHIVE_DIR_NAME}/"),
+            None,
+            "Older posts",
+        ));
+    }
     let index = page_shell(&Page {
         root: "",
         subtitle: "",
@@ -926,9 +1006,31 @@ fn build(cfg: &Config) -> Result<()> {
         }
     }
 
+    // Year pages: every post of each year, always generated so that review
+    // links from the collection page have a stable target.
+    if !years.is_empty() {
+        let archive_dir = cfg.output_dir.join(ARCHIVE_DIR_NAME);
+        fs::create_dir(&archive_dir)?;
+
+        for (key, year_posts) in &years {
+            let bar = render_archive_bar(&years, "", Some(key.as_str()), "Archive");
+            let subtitle = format!("Archive: {key}");
+            let body = render_posts_body(year_posts, "../", false);
+            let page = page_shell(&Page {
+                root: "../",
+                subtitle: &subtitle,
+                nav: &nav_tags,
+                tag_bar: &bar,
+                sidebar: &side_tags,
+                body: &body,
+            });
+            fs::write(archive_dir.join(format!("{key}.html")), page)?;
+        }
+    }
+
     // Collection page.
     if has_collection {
-        let body = render_collection(&collection, "");
+        let body = render_collection(&collection, "", &post_year);
         let page = page_shell(&Page {
             root: "",
             subtitle: "Collection",
@@ -945,9 +1047,10 @@ fn build(cfg: &Config) -> Result<()> {
     }
 
     println!(
-        "Wrote {} post(s) and {} tag page(s) to {}.",
+        "Wrote {} post(s), {} tag page(s) and {} year page(s) to {}.",
         posts.len(),
         groups.len(),
+        years.len(),
         cfg.output_dir.display()
     );
 
