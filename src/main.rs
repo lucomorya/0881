@@ -113,9 +113,12 @@ hr {
   gap: 3em;
   align-items: start;
 }
-.sidebar {
+.side {
   position: sticky;
   top: 2em;
+}
+.side .nav { margin: 0.6em 0 0.8em 0; }
+.sidebar {
   border: 1px solid #ccc;
   padding: 0.8em 1em;
 }
@@ -154,7 +157,7 @@ hr {
 }
 @media (max-width: 50em) {
   .layout { grid-template-columns: minmax(0, 1fr); }
-  .sidebar { position: static; }
+  .side { position: static; }
 }
 "##;
 
@@ -767,6 +770,13 @@ fn page_shell(p: &Page) -> String {
     let body = p.body;
     let sidebar = p.sidebar;
 
+    // Right column: the "collection" link on top, then the sidebar box.
+    let side = if nav.is_empty() && sidebar.is_empty() {
+        String::new()
+    } else {
+        format!("<div class=\"side\">\n{nav}\n{sidebar}\n</div>")
+    };
+
     format!(
         r#"<!doctype html>
 <html lang="en">
@@ -783,11 +793,10 @@ fn page_shell(p: &Page) -> String {
 <main>
 <h1><a href="{home}">{title}</a></h1>
 {sub}
-{nav}
 {tag_bar}
 {body}
 </main>
-{sidebar}
+{side}
 </div>
 </body>
 </html>
