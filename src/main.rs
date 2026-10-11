@@ -1033,7 +1033,7 @@ fn build(cfg: &Config) -> Result<()> {
         let body = render_collection(&collection, "", &post_year);
         let page = page_shell(&Page {
             root: "",
-            subtitle: "Collection",
+            subtitle: "collection",
             nav: "",
             tag_bar: "",
             sidebar: "",
