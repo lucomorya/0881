@@ -11,9 +11,18 @@
 //! Pictures are stored in assets/. With `spoiler: yes`, the picture is hidden
 //! behind a "show me" toggle first.
 //!
+//! An optional sidebar.txt (next to Cargo.toml) lists what you are currently
+//! reading/watching/etc. One item per line:
+//!
+//!     reading: cover-volume12.jpg | Harem in the Labyrinth of Another World
+//!     watching: mayoiga.jpg | Mayoiga
+//!
+//! Lines starting with # and blank lines are ignored. Sections appear in the
+//! order they first show up. Pictures live in assets/.
+//!
 //! Output goes to site/:
 //!     index.html            all posts
-//!     tags/<tag>.html       one page per tag
+//!     tags/<tag>.html       one page per tag (grouped by year)
 //!     assets/               copied from assets/
 //!
 //! Run from the blog's folder, or pass the folder as the first argument:
@@ -33,7 +42,7 @@ const MAX_CHARS: usize = 1000; // only a warning, never enforced
 
 const CSS: &str = r##"
 body {
-  max-width: 40em;
+  max-width: 58em;
   margin: 2em auto;
   padding: 0 1em;
   font-family: Georgia, "Times New Roman", serif;
@@ -44,6 +53,13 @@ body {
 h1 { font-size: 1.6em; margin-bottom: 0.2em; }
 h1 a { color: inherit; text-decoration: none; }
 h2 { font-size: 1.1em; font-weight: normal; color: #666; }
+h3.year {
+  font-size: 0.95em;
+  font-weight: normal;
+  color: #666;
+  font-family: Verdana, Arial, sans-serif;
+  margin: 1.5em 0 0.5em 0;
+}
 .date, .tags, .tag-list {
   color: #666;
   font-family: Verdana, Arial, sans-serif;
@@ -79,12 +95,47 @@ hr {
   border-top: 1px solid #ccc;
   margin: 1.5em 0;
 }
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 40em) 15em;
+  gap: 3em;
+  align-items: start;
+}
+.sidebar {
+  position: sticky;
+  top: 2em;
+  border: 1px solid #ccc;
+  padding: 0.8em 1em;
+}
+.sidebar h3 {
+  font-family: Verdana, Arial, sans-serif;
+  font-size: 0.85em;
+  font-weight: normal;
+  color: #666;
+  margin: 0 0 0.5em 0;
+}
+.sidebar h3:not(:first-child) { margin-top: 1.2em; }
+.shelf { display: flex; flex-wrap: wrap; gap: 0.5em; }
+.shelf figure { margin: 0; width: calc(50% - 0.25em); }
+.shelf img { display: block; width: 100%; height: auto; }
+.shelf figcaption {
+  font-family: Verdana, Arial, sans-serif;
+  font-size: 0.7em;
+  color: #666;
+  line-height: 1.3;
+  margin-top: 0.2em;
+}
+@media (max-width: 50em) {
+  .layout { grid-template-columns: minmax(0, 1fr); }
+  .sidebar { position: static; }
+}
 "##;
 
 struct Config {
     posts_dir: PathBuf,
     assets_dir: PathBuf,
     output_dir: PathBuf,
+    sidebar_file: PathBuf,
 }
 
 struct Post {
@@ -94,6 +145,14 @@ struct Post {
     tags: Vec<String>,
     spoiler: bool,
 }
+
+struct ShelfItem {
+    pic: String,
+    title: String,
+}
+
+/// (section name, items), in the order they appear in sidebar.txt.
+type Shelf = Vec<(String, Vec<ShelfItem>)>;
 
 /// Equivalent of Python's `html.escape(s, quote=True)`.
 fn escape(s: &str) -> String {
@@ -277,6 +336,55 @@ fn load_posts(cfg: &Config) -> Result<Vec<Post>> {
     Ok(posts)
 }
 
+/// Read sidebar.txt. Each line: `section: picture.jpg | Title`.
+/// A missing file simply means no sidebar.
+fn load_shelf(cfg: &Config) -> Result<Shelf> {
+    if !cfg.sidebar_file.is_file() {
+        return Ok(Vec::new());
+    }
+
+    let raw = fs::read_to_string(&cfg.sidebar_file)?.replace("\r\n", "\n");
+    let mut shelf: Shelf = Vec::new();
+
+    for (n, line) in raw.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let (section, rest) = line.split_once(':').ok_or_else(|| {
+            format!(
+                "sidebar.txt line {}: expected 'section: picture | title'",
+                n + 1
+            )
+        })?;
+        let (pic, title) = rest.split_once('|').unwrap_or((rest, ""));
+
+        let pic =
+            safe_pic_name(pic).map_err(|e| format!("sidebar.txt line {}: {e}", n + 1))?;
+        if pic.is_empty() {
+            return Err(format!("sidebar.txt line {}: missing picture", n + 1).into());
+        }
+        if !cfg.assets_dir.join(&pic).is_file() {
+            println!("WARNING: sidebar.txt uses missing picture 'assets/{pic}'.");
+        }
+
+        let section = section.trim().to_string();
+        let item = ShelfItem {
+            pic,
+            title: title.trim().to_string(),
+        };
+
+        if let Some(i) = shelf.iter().position(|(name, _)| *name == section) {
+            shelf[i].1.push(item);
+        } else {
+            shelf.push((section, vec![item]));
+        }
+    }
+
+    Ok(shelf)
+}
+
 /// Map tag slug -> posts (sorted by slug).
 fn group_by_tag(posts: &[Post]) -> BTreeMap<String, Vec<&Post>> {
     let mut groups: BTreeMap<String, Vec<&Post>> = BTreeMap::new();
@@ -366,7 +474,72 @@ fn render_post(post: &Post, root: &str) -> String {
     parts.join("\n")
 }
 
-fn render_page(posts: &[&Post], root: &str, subtitle: &str, tag_bar: &str) -> String {
+/// Render posts separated by <hr>. With `by_year`, a year heading is
+/// inserted whenever the year changes (posts must be newest first).
+fn render_posts(posts: &[&Post], root: &str, by_year: bool) -> String {
+    let mut out = String::new();
+    let mut current_year = "";
+
+    for post in posts {
+        if by_year {
+            let year = post.date.get(..4).unwrap_or("");
+            if year != current_year {
+                current_year = year;
+                if !year.is_empty() {
+                    out.push_str(&format!(r#"<h3 class="year">{}</h3>"#, escape(year)));
+                    out.push('\n');
+                }
+            }
+        }
+        out.push_str(&render_post(post, root));
+        out.push_str("\n<hr>\n");
+    }
+
+    out
+}
+
+/// Render the sidebar. `root` is "" or "../" like in `render_post`.
+fn render_shelf(shelf: &Shelf, root: &str) -> String {
+    if shelf.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::from(r#"<aside class="sidebar">"#);
+
+    for (name, items) in shelf {
+        out.push_str(&format!(
+            "\n<h3>{}:</h3>\n<div class=\"shelf\">",
+            escape(name)
+        ));
+
+        for item in items {
+            let src = escape(&format!("{root}assets/{}", item.pic));
+            let title = escape(&item.title);
+
+            out.push_str(&format!(
+                r#"<figure><img src="{src}" alt="{title}" title="{title}" loading="lazy">"#
+            ));
+            if !item.title.is_empty() {
+                out.push_str(&format!("<figcaption>{title}</figcaption>"));
+            }
+            out.push_str("</figure>");
+        }
+
+        out.push_str("</div>");
+    }
+
+    out.push_str("\n</aside>");
+    out
+}
+
+fn render_page(
+    posts: &[&Post],
+    root: &str,
+    subtitle: &str,
+    tag_bar: &str,
+    sidebar: &str,
+    by_year: bool,
+) -> String {
     let title = escape(SITE_TITLE);
 
     let sub = if subtitle.is_empty() {
@@ -378,8 +551,7 @@ fn render_page(posts: &[&Post], root: &str, subtitle: &str, tag_bar: &str) -> St
     let body = if posts.is_empty() {
         "<p><em>Nothing posted yet.</em></p>".to_string()
     } else {
-        let rendered: Vec<String> = posts.iter().map(|p| render_post(p, root)).collect();
-        format!("{}\n<hr>", rendered.join("\n<hr>\n"))
+        render_posts(posts, root, by_year)
     };
 
     let home = if root.is_empty() { "./" } else { root };
@@ -397,10 +569,15 @@ fn render_page(posts: &[&Post], root: &str, subtitle: &str, tag_bar: &str) -> St
 </style>
 </head>
 <body>
+<div class="layout">
+<main>
 <h1><a href="{home}">{title}</a></h1>
 {sub}
 {tag_bar}
 {body}
+</main>
+{sidebar}
+</div>
 </body>
 </html>
 "#
@@ -460,8 +637,20 @@ fn build(cfg: &Config) -> Result<()> {
     let groups = group_by_tag(&posts);
     let names = tag_names(&posts)?;
 
+    // Tag pages live one folder deeper, so their image paths need "../".
+    let shelf = load_shelf(cfg)?;
+    let side_index = render_shelf(&shelf, "");
+    let side_tags = render_shelf(&shelf, "../");
+
     let all: Vec<&Post> = posts.iter().collect();
-    let index = render_page(&all, "", "", &render_tag_bar(&groups, &names));
+    let index = render_page(
+        &all,
+        "",
+        "",
+        &render_tag_bar(&groups, &names),
+        &side_index,
+        false,
+    );
     fs::write(cfg.output_dir.join("index.html"), index)?;
 
     if !groups.is_empty() {
@@ -469,7 +658,14 @@ fn build(cfg: &Config) -> Result<()> {
         fs::create_dir(&tags_dir)?;
 
         for (slug, tagged) in &groups {
-            let page = render_page(tagged, "../", &format!("Tag: {}", names[slug]), "");
+            let page = render_page(
+                tagged,
+                "../",
+                &format!("Tag: {}", names[slug]),
+                "",
+                &side_tags,
+                true,
+            );
             fs::write(tags_dir.join(format!("{slug}.html")), page)?;
         }
     }
@@ -498,6 +694,7 @@ fn run() -> Result<()> {
         posts_dir: root.join("posts"),
         assets_dir: root.join("assets"),
         output_dir: root.join("site"),
+        sidebar_file: root.join("sidebar.txt"),
     };
 
     fs::create_dir_all(&cfg.posts_dir)?;
