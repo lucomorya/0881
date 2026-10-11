@@ -31,6 +31,9 @@
 //!
 //! Lines starting with # and blank lines are ignored in both files.
 //!
+//! style.css (required, next to Cargo.toml) is the stylesheet. It is copied
+//! to site/style.css and linked from every page.
+//!
 //! Output goes to site/:
 //!     index.html            the latest HOME_POSTS posts
 //!     archive/<year>.html   every post of that year
@@ -55,114 +58,6 @@ const HOME_POSTS: usize = 20; // how many of the newest posts the home page show
 const SITE_TITLE: &str = "おっぱい";
 const MAX_CHARS: usize = 1000; // only a warning, never enforced
 
-const CSS: &str = r##"
-body {
-  max-width: 58em;
-  margin: 2em auto;
-  padding: 0 1em;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 1.125rem;
-  line-height: 1.6;
-  color: #222;
-}
-h1 { font-size: 1.6em; margin-bottom: 0.2em; }
-h1 a { color: inherit; text-decoration: none; }
-h2 { font-size: 1.1em; font-weight: normal; color: #666; }
-h3.year, h3.section {
-  font-size: 0.95em;
-  font-weight: normal;
-  color: #666;
-  font-family: Verdana, Arial, sans-serif;
-  margin: 1.5em 0 0.5em 0;
-}
-.date, .tags, .tag-list, .nav {
-  color: #666;
-  font-family: Verdana, Arial, sans-serif;
-  font-size: 0.85em;
-  margin: 0 0 0.3em 0;
-}
-.entry p {
-  margin: 0 0 0.6em 0;
-  white-space: pre-wrap;
-  text-align: justify;
-  hyphens: auto;
-}
-.entry p.date, .entry p.tags {
-  white-space: normal;
-  text-align: left;
-  hyphens: manual;
-}
-.pic {
-  max-width: min(100%, 240px);
-  height: auto;
-  margin-bottom: 0.6em;
-}
-details { margin-bottom: 0.6em; }
-summary {
-  cursor: pointer;
-  color: #666;
-  font-family: Verdana, Arial, sans-serif;
-  font-size: 0.85em;
-  margin-bottom: 0.4em;
-}
-hr {
-  border: none;
-  border-top: 1px solid #ccc;
-  margin: 1.5em 0;
-}
-.layout {
-  display: grid;
-  grid-template-columns: minmax(0, 40em) 15em;
-  gap: 3em;
-  align-items: start;
-}
-.side {
-  position: sticky;
-  top: 2em;
-}
-.side .nav { margin: 0.6em 0 0.8em 0; }
-.sidebar {
-  border: 1px solid #ccc;
-  padding: 0.8em 1em;
-}
-.sidebar h3 {
-  font-family: Verdana, Arial, sans-serif;
-  font-size: 0.85em;
-  font-weight: normal;
-  color: #666;
-  margin: 0 0 0.5em 0;
-}
-.sidebar h3:not(:first-child) { margin-top: 1.2em; }
-.shelf { display: flex; flex-wrap: wrap; gap: 0.5em; }
-.shelf figure { margin: 0; width: calc(50% - 0.25em); }
-.shelf img { display: block; width: 100%; height: auto; }
-.shelf figcaption {
-  font-family: Verdana, Arial, sans-serif;
-  font-size: 0.7em;
-  color: #666;
-  line-height: 1.3;
-  margin-top: 0.2em;
-}
-.collection { list-style: none; margin: 0; padding: 0; }
-.collection li {
-  display: flex;
-  align-items: center;
-  gap: 0.8em;
-  margin-bottom: 0.6em;
-}
-.collection .thumb { display: block; width: 56px; height: auto; }
-.collection .thumb-gap { display: block; width: 56px; flex: none; }
-.collection .info { display: flex; flex-direction: column; line-height: 1.35; }
-.collection .details {
-  font-family: Verdana, Arial, sans-serif;
-  font-size: 0.8em;
-  color: #666;
-}
-@media (max-width: 50em) {
-  .layout { grid-template-columns: minmax(0, 1fr); }
-  .side { position: static; }
-}
-"##;
 
 struct Config {
     posts_dir: PathBuf,
@@ -170,6 +65,7 @@ struct Config {
     output_dir: PathBuf,
     sidebar_file: PathBuf,
     collection_file: PathBuf,
+    css_file: PathBuf,
 }
 
 struct Post {
@@ -829,7 +725,7 @@ fn page_shell(p: &Page) -> String {
     };
 
     let home = if p.root.is_empty() { "./" } else { p.root };
-    let css = CSS.trim();
+    let root = p.root;
     let nav = p.nav;
     let tag_bar = p.tag_bar;
     let body = p.body;
@@ -849,9 +745,7 @@ fn page_shell(p: &Page) -> String {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title>
-<style>
-{css}
-</style>
+<link rel="stylesheet" href="{root}style.css">
 </head>
 <body>
 <div class="layout">
@@ -917,6 +811,16 @@ fn build(cfg: &Config) -> Result<()> {
         fs::remove_dir_all(&cfg.output_dir)?;
     }
     fs::create_dir_all(&cfg.output_dir)?;
+
+    // The stylesheet is required: without it every page would be unstyled.
+    if !cfg.css_file.is_file() {
+        return Err(format!(
+            "{} not found. Put your stylesheet there.",
+            cfg.css_file.display()
+        )
+        .into());
+    }
+    fs::copy(&cfg.css_file, cfg.output_dir.join("style.css"))?;
 
     let posts = load_posts(cfg)?;
     let groups = group_by_tag(&posts);
@@ -1069,6 +973,7 @@ fn run() -> Result<()> {
         output_dir: root.join("site"),
         sidebar_file: root.join("sidebar.txt"),
         collection_file: root.join("collection.txt"),
+        css_file: root.join("style.css"),
     };
 
     fs::create_dir_all(&cfg.posts_dir)?;
