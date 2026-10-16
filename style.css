@@ -52,17 +52,25 @@ hr {
   border-top: 1px solid #ccc;
   margin: 1.5em 0;
 }
+
+/* Page layout: main column + right column */
 .layout {
   display: grid;
   grid-template-columns: minmax(0, 40em) 15em;
   gap: 3em;
   align-items: start;
 }
+/* Pages without a right column (the collection page) use the full width */
+.layout:not(:has(.side)) {
+  grid-template-columns: minmax(0, 1fr);
+}
 .side {
   position: sticky;
   top: 2em;
 }
 .side .nav { margin: 0.6em 0 0.8em 0; }
+
+/* Sidebar: what I'm reading / watching */
 .sidebar {
   border: 1px solid #ccc;
   padding: 0.8em 1em;
@@ -85,21 +93,45 @@ hr {
   line-height: 1.3;
   margin-top: 0.2em;
 }
-.collection { list-style: none; margin: 0; padding: 0; }
-.collection li {
-  display: flex;
-  align-items: center;
-  gap: 0.8em;
-  margin-bottom: 0.6em;
+
+/* Collection: grid of covers with the title underneath.
+   Change 110px to make covers bigger (e.g. 140px) or smaller (e.g. 90px). */
+.collection {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 1.4em 1em;
 }
-.collection .thumb { display: block; width: 56px; height: auto; }
-.collection .thumb-gap { display: block; width: 56px; flex: none; }
-.collection .info { display: flex; flex-direction: column; line-height: 1.35; }
+.collection li {
+  display: block;
+  text-align: center;
+}
+.collection .thumb {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+}
+.collection .thumb-gap { display: none; }
+.collection .info {
+  display: flex;
+  flex-direction: column;
+  margin-top: 0.4em;
+  font-size: 0.8em;
+  line-height: 1.3;
+}
+.collection .info a { color: inherit; }
 .collection .details {
   font-family: Verdana, Arial, sans-serif;
-  font-size: 0.8em;
+  font-size: 0.85em;
   color: #666;
+  margin-top: 0.2em;
 }
+
+/* Small screens: single column */
 @media (max-width: 50em) {
   .layout { grid-template-columns: minmax(0, 1fr); }
   .side { position: static; }
