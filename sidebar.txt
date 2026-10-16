@@ -1,6 +1,3 @@
-reading: cover-volume12.jpg　
-reading: よつばと！１６.jpg　
-reading: 描くなるうえは５.jpg　
-reading: 生徒会にも穴はいる！１.jpg
+reading:
 watching: 
 bitching: 
