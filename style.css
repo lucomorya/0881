@@ -95,13 +95,13 @@ hr {
 }
 
 /* Collection: grid of covers with the title underneath.
-   Change 110px to make covers bigger (e.g. 140px) or smaller (e.g. 90px). */
+   Change 140px to make covers bigger (e.g. 170px) or smaller (e.g. 110px). */
 .collection {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 1.4em 1em;
 }
 .collection li {
