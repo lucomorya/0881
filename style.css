@@ -95,13 +95,13 @@ hr {
 }
 
 /* Collection: grid of covers with the title underneath.
-   Change 140px to make covers bigger (e.g. 170px) or smaller (e.g. 110px). */
+   Exactly 5 per row on wide screens; fewer on smaller ones (see bottom). */
 .collection {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 1.4em 1em;
 }
 .collection li {
@@ -135,4 +135,11 @@ hr {
 @media (max-width: 50em) {
   .layout { grid-template-columns: minmax(0, 1fr); }
   .side { position: static; }
+  .collection { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (max-width: 36em) {
+  .collection { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 24em) {
+  .collection { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
